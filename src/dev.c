@@ -150,34 +150,55 @@ bool find_dev_by_id(const char* vidpid, char* out) {
 }
 
 int find_hidraw(const char* syspath) {
-	char function[PATH_MAX];
-	char filename[PATH_MAX];
-	DIR* dir;
-	struct dirent* dent;
+    char function[PATH_MAX];
+    char hidraw_path[PATH_MAX];
+    char filename[PATH_MAX];
+    DIR* dir;
+    DIR* hidraw_dir;
+    struct dirent* dent;
+    struct dirent* hidraw_dent;
 
-	if (!find_function(syspath, function, sizeof(function))) {
-		return -1;
-	}
-	strncat(function, "/hidraw", sizeof(function) - strlen(function) - 1);
-	dir = opendir(function);
-	if (!dir) {
-		log_errno(ERROR, "Failed to opendir hidraw");
-		return -1;
-	}
+    dir = opendir(syspath);
+    if (!dir) {
+        log_errno(ERROR, "Failed to opendir function");
+        return -1;
+    }
 
-	while ((dent = readdir(dir))) {
-		if (dent->d_type != DT_DIR) {
-			continue;
-		}
-		if (strncmp(dent->d_name, "hidraw", 6) == 0) {
-			snprintf(filename, sizeof(filename), "%s/%s/dev", function, dent->d_name);
-			break;
-		}
-	}
-	if (!dent) {
-		closedir(dir);
-		return -1;
-	}
-	closedir(dir);
-	return find_dev(filename, "hidraw");
+    while ((dent = readdir(dir))) {
+        if (dent->d_type != DT_DIR) {
+            continue;
+        }
+
+        if (strncmp(dent->d_name, "0003:", 5) != 0) {
+            continue;
+        }
+
+        snprintf(function, sizeof(function), "%s/%s", syspath, dent->d_name);
+        snprintf(hidraw_path, sizeof(hidraw_path), "%s/hidraw", function);
+
+        hidraw_dir = opendir(hidraw_path);
+        if (!hidraw_dir) {
+            /* Some HID children do not expose hidraw; keep scanning siblings. */
+            continue;
+        }
+
+        while ((hidraw_dent = readdir(hidraw_dir))) {
+            if (hidraw_dent->d_type != DT_DIR) {
+                continue;
+            }
+
+            if (strncmp(hidraw_dent->d_name, "hidraw", 6) == 0) {
+                snprintf(filename, sizeof(filename), "%s/%s/dev",
+                         hidraw_path, hidraw_dent->d_name);
+                closedir(hidraw_dir);
+                closedir(dir);
+                return find_dev(filename, "hidraw");
+            }
+        }
+
+        closedir(hidraw_dir);
+    }
+
+    closedir(dir);
+    return -1;
 }
